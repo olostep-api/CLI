@@ -1,7 +1,7 @@
 # Olostep API CLI
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#requirements)
-[![License](https://img.shields.io/badge/license-Unlicensed-lightgrey.svg)](#license)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 
 CLI for the **Olostep API** covering: **map**, **answer**, **scrape**, **crawl**, **batch scrape**, and **batch update**.
 
@@ -168,4 +168,6 @@ python main.py --help
 
 ## License
 
-No license file is included in this repository.
+This project is licensed under the MIT License.
+
+See `LICENSE`.
