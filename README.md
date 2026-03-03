@@ -170,4 +170,4 @@ python main.py --help
 
 This project is licensed under the MIT License.
 
-See `LICENSE`.
+See [`LICENSE`](LICENSE).
