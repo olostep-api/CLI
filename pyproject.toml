@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "olostep-api-cli"
+version = "0.1.0"
+description = "CLI for Olostep APIs: map, answer, scrape, crawl, batch-scrape"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27.0",
+  "typer>=0.12.0",
+  "loguru>=0.7.2",
+]
+
+[project.scripts]
+olostep = "main:app"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["config", "config.*", "src", "src.*", "utils", "utils.*"]
