@@ -1,6 +1,6 @@
 # Olostep API CLI
 
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#requirements)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#prerequisites)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 
 CLI for the **Olostep API** covering: **map**, **answer**, **scrape**, **crawl**, **batch scrape**, and **batch update**.
@@ -9,8 +9,9 @@ CLI for the **Olostep API** covering: **map**, **answer**, **scrape**, **crawl**
 
 ## Table of Contents
 
+- [Objective](#objective)
+- [Prerequisites](#prerequisites)
 - [Features](#features)
-- [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Usage](#usage)
@@ -22,6 +23,16 @@ CLI for the **Olostep API** covering: **map**, **answer**, **scrape**, **crawl**
 
 ---
 
+## Objective
+
+Provide a developer-friendly CLI for calling the Olostep API (maps, answers, scrapes, crawls, and batches) and saving the JSON responses to disk for downstream processing and debugging.
+
+## Prerequisites
+
+- Python **3.10+**
+- `pip` (or an equivalent Python packaging tool)
+- An **Olostep** API key/token
+
 ## Features
 
 - **Map**: discover site URLs via `POST /v1/maps`
@@ -30,12 +41,6 @@ CLI for the **Olostep API** covering: **map**, **answer**, **scrape**, **crawl**
 - **Crawl**: crawl site pages via `POST /v1/crawls`, poll via `GET /v1/crawls/{id}`, list pages via `GET /v1/crawls/{id}/pages`, then retrieve content via `GET /v1/retrieve`
 - **Batch scrape**: create batch via `POST /v1/batches`, poll via `GET /v1/batches/{id}`, list items via `GET /v1/batches/{id}/items`, retrieve via `GET /v1/retrieve`
 - **Batch update**: patch batch metadata via `PATCH /v1/batches/{id}`
-
-## Requirements
-
-- Python **3.10+**
-- `pip`
-- An Olostep API key
 
 ---
 
