@@ -3,9 +3,15 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#prerequisites)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 
-Command-line interface for the [Olostep API](https://www.olostep.com/). This package wraps common Olostep workflows like `map`, `answer`, `scrape`, `crawl`, `batch-scrape`, and `batch-update`, then writes the JSON responses to local files for debugging, automation, and downstream processing.
+Command-line interface for the [Olostep API](https://www.olostep.com/) — built for AI companies and agents that need reliable, cost-effective, real-time web data.
 
-It follows the [Olostep documentation](https://docs.olostep.com/) and exposes a packaged `olostep` command through Typer.
+Olostep CLI lets you search, scrape, and crawl the web directly from your terminal, turning complex, JavaScript-heavy websites into clean, structured, LLM-ready outputs without managing browsers, proxies, or anti-bot infrastructure.
+
+The CLI wraps core Olostep workflows like `search`, `map`, `answer`, `scrape`, `crawl`, `batch-scrape`, and `batch-update`, and writes structured results (JSON, Markdown, and more) to local files for debugging, automation, and downstream AI pipelines.
+
+Designed for modern AI use cases, it integrates seamlessly into agent workflows, data pipelines, and research automation.
+
+Built with [Typer](https://typer.tiangolo.com/) and aligned with the [Olostep documentation](https://docs.olostep.com/), the package exposes a simple and extensible `olostep` command for fast iteration and production use.
 
 ---
 
