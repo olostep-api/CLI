@@ -12,7 +12,7 @@ from config.config import (
     RETRIEVE_FORMATS_ALLOWED,
 )
 from src.api_client import OlostepAPI
-from utils.utils import poll
+from utils.utils import console, poll
 
 _ALLOWED_RETRIEVE_FORMATS = set(RETRIEVE_FORMATS_ALLOWED)
 
@@ -158,13 +158,17 @@ async def run_crawl(
         raise RuntimeError(f"Crawl create response missing id: {created}")
     crawl_id = str(crawl_id)
 
-    logger.info(f"Crawl created: {crawl_id}. Polling...")
-    final_crawl = await poll(
-        fetch=lambda: api.get_crawl(crawl_id),
-        is_done=_is_crawl_terminal,
-        interval_s=poll_seconds,
-        timeout_s=poll_timeout_s,
-    )
+    logger.info(f"Crawl created: {crawl_id}")
+    with console.status(f"[bold blue]Polling crawl {crawl_id}…") as status_spinner:
+        final_crawl = await poll(
+            fetch=lambda: api.get_crawl(crawl_id),
+            is_done=_is_crawl_terminal,
+            interval_s=poll_seconds,
+            timeout_s=poll_timeout_s,
+            on_tick=lambda obj: status_spinner.update(
+                f"[bold blue]Crawling {crawl_id} — {_crawl_status(obj)}"
+            ),
+        )
     status = _crawl_status(final_crawl)
     if status != "completed":
         raise RuntimeError(f"Crawl {crawl_id} finished with status={status}: {final_crawl}")
