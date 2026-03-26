@@ -34,16 +34,35 @@ from config.config import (
 )
 from src.answer_api import run_answer
 from src.api_client import OlostepAPI
-from src.batch_api import parse_retrieve_formats, run_batch_scrape, run_batch_update
-from src.crawl_api import parse_crawl_retrieve_formats, run_crawl
+from src.batch_api import build_batch_payload, parse_retrieve_formats, read_csv_items, run_batch_scrape, run_batch_update
+from src.crawl_api import build_crawl_payload, parse_crawl_retrieve_formats, run_crawl
 from src.map_api import run_map
 from src.scrape_api import parse_scrape_formats, run_scrape, run_scrape_get
-from utils.utils import write_json
+from utils.utils import is_stdout_path, write_json
 
 app = typer.Typer(
     add_completion=False,
+    rich_markup_mode="rich",
     help="Olostep CLI: map, answer, scrape, scrape-get, crawl, batch-scrape, batch-update",
 )
+
+__version__ = "0.1.0"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        print(f"olostep {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True,
+        help="Show version and exit.",
+    ),
+) -> None:
+    """Olostep CLI"""
 
 
 def _make_api(timeout_s: float) -> OlostepAPI:
@@ -114,7 +133,7 @@ def _load_json_object_input(
 @app.command("crawl")
 def crawl_cmd(
     start_url: str = typer.Argument(..., help="Start URL for crawl"),
-    out: str = typer.Option(DEFAULT_CRAWL_OUT_PATH, "--out", help="Output JSON path"),
+    out: str = typer.Option(DEFAULT_CRAWL_OUT_PATH, "--out", help="Output JSON path (use '-' for stdout)"),
     max_pages: int = typer.Option(
         DEFAULT_CRAWL_MAX_PAGES, "--max-pages", help="Maximum pages to crawl"
     ),
@@ -172,7 +191,22 @@ def crawl_cmd(
     timeout_s: float = typer.Option(
         DEFAULT_HTTP_TIMEOUT_S, "--timeout", help="HTTP timeout in seconds"
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the API payload as JSON and exit without sending it"
+    ),
 ):
+    """Crawl a website starting from a URL and retrieve page contents.
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep crawl "https://docs.example.com" --max-pages 50
+
+    [dim]$[/dim] olostep crawl "https://example.com" --max-pages 20 --max-depth 2 --formats markdown,html
+
+    [dim]$[/dim] olostep crawl "https://example.com" --max-pages 100 --search-query "pricing" --top-n 10
+
+    [dim]$[/dim] olostep crawl "https://example.com" --max-pages 10 --dry-run
+    """
     if max_pages < 1:
         raise typer.BadParameter("--max-pages must be >= 1", param_hint="--max-pages")
     if max_depth is not None and max_depth < 0:
@@ -192,6 +226,25 @@ def crawl_cmd(
         retrieve_formats = parse_crawl_retrieve_formats(formats)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--formats") from exc
+
+    if dry_run:
+        payload = build_crawl_payload(
+            start_url=start_url,
+            max_pages=max_pages,
+            max_depth=max_depth,
+            include_subdomain=include_subdomain,
+            include_external=include_external,
+            include_urls=include_urls,
+            exclude_urls=exclude_urls,
+            search_query=search_query,
+            top_n=top_n,
+            webhook=webhook,
+            timeout=crawl_timeout,
+            follow_robots_txt=follow_robots_txt,
+        )
+        payload["_retrieve_formats"] = list(retrieve_formats)
+        print(json.dumps(payload, indent=2))
+        raise typer.Exit()
 
     api = _make_api(timeout_s)
     result = asyncio.run(
@@ -217,13 +270,14 @@ def crawl_cmd(
         )
     )
     write_json(out, result)
-    logger.info(f"Wrote: {out}")
+    if not is_stdout_path(out):
+        logger.info(f"Wrote: {out}")
 
 
 @app.command("map")
 def map_cmd(
     url: str = typer.Argument(..., help="Website URL to map"),
-    out: str = typer.Option(DEFAULT_MAP_OUT_PATH, "--out", help="Output JSON path"),
+    out: str = typer.Option(DEFAULT_MAP_OUT_PATH, "--out", help="Output JSON path (use '-' for stdout)"),
     include_subdomain: Optional[bool] = typer.Option(
         None,
         "--include-subdomain/--no-include-subdomain",
@@ -245,6 +299,16 @@ def map_cmd(
         DEFAULT_HTTP_TIMEOUT_S, "--timeout", help="HTTP timeout in seconds"
     ),
 ):
+    """Discover all URLs on a website.
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep map "https://example.com"
+
+    [dim]$[/dim] olostep map "https://example.com" --top-n 100 --search-query "blog"
+
+    [dim]$[/dim] olostep map "https://example.com" --include-subdomain --out - | jq '.urls[:5]'
+    """
     if legacy_limit is not None:
         raise typer.BadParameter("`--limit` was removed. Use `--top-n`.", param_hint="--limit")
     if top_n is not None and top_n < 1:
@@ -264,13 +328,14 @@ def map_cmd(
         )
     )
     write_json(out, result)
-    logger.info(f"Wrote: {out}")
+    if not is_stdout_path(out):
+        logger.info(f"Wrote: {out}")
 
 
 @app.command("answer")
 def answer_cmd(
     task: str = typer.Argument(..., help="Task/question for Olostep Answers"),
-    out: str = typer.Option(DEFAULT_ANSWER_OUT_PATH, "--out", help="Output JSON path"),
+    out: str = typer.Option(DEFAULT_ANSWER_OUT_PATH, "--out", help="Output JSON path (use '-' for stdout)"),
     json_format: Optional[str] = typer.Option(
         None,
         "--json-format",
@@ -287,6 +352,16 @@ def answer_cmd(
         DEFAULT_HTTP_TIMEOUT_S, "--timeout", help="HTTP timeout in seconds"
     ),
 ):
+    """Ask a question and get a researched answer from the web.
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep answer "What is Olostep and what are its main features?"
+
+    [dim]$[/dim] olostep answer "Who is the CEO of OpenAI?" --out - | jq .result
+
+    [dim]$[/dim] olostep answer "Top 3 Python web frameworks" --json-format '{"frameworks": [{"name": "", "url": ""}]}'
+    """
     if legacy_model is not None:
         raise typer.BadParameter(
             "`--model` was removed. Use `--json-format`.", param_hint="--model"
@@ -304,13 +379,14 @@ def answer_cmd(
         )
     )
     write_json(out, result)
-    logger.info(f"Wrote: {out}")
+    if not is_stdout_path(out):
+        logger.info(f"Wrote: {out}")
 
 
 @app.command("scrape")
 def scrape_cmd(
     url_to_scrape: str = typer.Argument(..., help="URL to scrape"),
-    out: str = typer.Option(DEFAULT_SCRAPE_OUT_PATH, "--out", help="Output JSON path"),
+    out: str = typer.Option(DEFAULT_SCRAPE_OUT_PATH, "--out", help="Output JSON path (use '-' for stdout)"),
     formats: str = typer.Option(
         DEFAULT_SCRAPE_FORMATS,
         "--formats",
@@ -336,6 +412,18 @@ def scrape_cmd(
         DEFAULT_HTTP_TIMEOUT_S, "--timeout", help="HTTP timeout in seconds"
     ),
 ):
+    """Scrape a single URL and return its content in one or more formats.
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep scrape "https://example.com"
+
+    [dim]$[/dim] olostep scrape "https://example.com" --formats markdown,html --country US
+
+    [dim]$[/dim] olostep scrape "https://example.com" --payload-json '{"remove_selectors": [".nav", ".footer"]}'
+
+    [dim]$[/dim] olostep scrape "https://example.com" --out - | jq .result.markdown_content
+    """
     if wait_before_scraping is not None and wait_before_scraping < 0:
         raise typer.BadParameter(
             "--wait-before-scraping must be >= 0",
@@ -366,27 +454,37 @@ def scrape_cmd(
         )
     )
     write_json(out, result)
-    logger.info(f"Wrote: {out}")
+    if not is_stdout_path(out):
+        logger.info(f"Wrote: {out}")
 
 
 @app.command("scrape-get")
 def scrape_get_cmd(
     scrape_id: str = typer.Argument(..., help="Scrape ID"),
-    out: str = typer.Option(DEFAULT_SCRAPE_GET_OUT_PATH, "--out", help="Output JSON path"),
+    out: str = typer.Option(DEFAULT_SCRAPE_GET_OUT_PATH, "--out", help="Output JSON path (use '-' for stdout)"),
     timeout_s: float = typer.Option(
         DEFAULT_HTTP_TIMEOUT_S, "--timeout", help="HTTP timeout in seconds"
     ),
 ):
+    """Retrieve the result of a previous scrape by its ID.
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep scrape-get scrape_abc123
+
+    [dim]$[/dim] olostep scrape-get scrape_abc123 --out - | jq .result.markdown_content
+    """
     api = _make_api(timeout_s)
     result = asyncio.run(run_scrape_get(api, scrape_id))
     write_json(out, result)
-    logger.info(f"Wrote: {out}")
+    if not is_stdout_path(out):
+        logger.info(f"Wrote: {out}")
 
 
 @app.command("batch-scrape")
 def batch_scrape_cmd(
     csv_path: str = typer.Argument(..., help="CSV with columns: custom_id,url (or id,url)"),
-    out: str = typer.Option(DEFAULT_BATCH_OUT_PATH, "--out", help="Output JSON path"),
+    out: str = typer.Option(DEFAULT_BATCH_OUT_PATH, "--out", help="Output JSON path (use '-' for stdout)"),
     formats: str = typer.Option(
         DEFAULT_BATCH_FORMATS,
         "--formats",
@@ -407,7 +505,24 @@ def batch_scrape_cmd(
         "--items-limit",
         help="Batch items page size (API recommends 10-50)",
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the API payload as JSON and exit without sending it"
+    ),
 ):
+    """Scrape many URLs in parallel from a CSV file.
+
+    The CSV must have columns [bold]custom_id[/bold] (or [bold]id[/bold]) and [bold]url[/bold].
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep batch-scrape urls.csv
+
+    [dim]$[/dim] olostep batch-scrape urls.csv --formats markdown,html --country US
+
+    [dim]$[/dim] olostep batch-scrape urls.csv --parser-id my-parser --out results.json
+
+    [dim]$[/dim] olostep batch-scrape urls.csv --dry-run
+    """
     try:
         retrieve_formats = parse_retrieve_formats(formats)
     except ValueError as exc:
@@ -419,6 +534,13 @@ def batch_scrape_cmd(
         raise typer.BadParameter("--log-every must be >= 1", param_hint="--log-every")
     if items_limit < 1:
         raise typer.BadParameter("--items-limit must be >= 1", param_hint="--items-limit")
+
+    if dry_run:
+        items = read_csv_items(csv_path)
+        payload = build_batch_payload(items, country=country, parser_id=parser_id)
+        payload["_retrieve_formats"] = list(retrieve_formats)
+        print(json.dumps(payload, indent=2))
+        raise typer.Exit()
 
     tok = _get_token()
     result = asyncio.run(
@@ -458,12 +580,22 @@ def batch_update_cmd(
     out: str = typer.Option(
         DEFAULT_BATCH_UPDATE_OUT_PATH,
         "--out",
-        help="Output JSON path",
+        help="Output JSON path (use '-' for stdout)",
     ),
     timeout_s: float = typer.Option(
         DEFAULT_HTTP_TIMEOUT_S, "--timeout", help="HTTP timeout in seconds"
     ),
 ):
+    """Update metadata on an existing batch.
+
+    [bold]Examples:[/bold]
+
+    [dim]$[/dim] olostep batch-update batch_abc123 --metadata-json '{"team": "growth", "project": "q1"}'
+
+    [dim]$[/dim] olostep batch-update batch_abc123 --metadata-file meta.json
+
+    [dim]$[/dim] olostep batch-update batch_abc123 --metadata-json '{"status": "reviewed"}' --out -
+    """
     metadata_obj = _load_json_object_input(
         raw_json=metadata_json,
         file_path=metadata_file,

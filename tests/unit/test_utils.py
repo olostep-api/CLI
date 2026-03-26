@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from utils.utils import PollTimeoutError, poll, write_json
+from utils.utils import PollTimeoutError, is_stdout_path, poll, write_json
 
 
 class TestWriteJson:
@@ -36,6 +36,27 @@ class TestWriteJson:
         assert "🚀" in text
         assert "日本語" in text
         Path(path).unlink()
+
+    def test_stdout_writes_json_to_stdout(self, capsys):
+        data = {"hello": "world", "n": 42}
+        write_json("-", data)
+        captured = capsys.readouterr()
+        assert json.loads(captured.out) == data
+
+    def test_stdout_no_file_created(self, capsys, tmp_path):
+        write_json("-", {"ok": True})
+        assert not (tmp_path / "-").exists()
+
+
+class TestIsStdoutPath:
+    def test_dash_is_stdout(self):
+        assert is_stdout_path("-") is True
+
+    def test_regular_path_is_not_stdout(self):
+        assert is_stdout_path("output/result.json") is False
+
+    def test_path_object_dash(self):
+        assert is_stdout_path(Path("-")) is True
 
 
 class TestPoll:
@@ -76,6 +97,41 @@ class TestPoll:
         )
         assert result["status"] == "completed"
         assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_on_tick_called_each_fetch(self):
+        call_count = 0
+        ticked = []
+
+        async def fetch():
+            nonlocal call_count
+            call_count += 1
+            return {"status": "completed" if call_count >= 3 else "pending", "n": call_count}
+
+        result = await poll(
+            fetch=fetch,
+            is_done=lambda obj: obj["status"] == "completed",
+            interval_s=0.05,
+            timeout_s=5.0,
+            on_tick=lambda obj: ticked.append(obj),
+        )
+        assert result["status"] == "completed"
+        assert len(ticked) == 3
+        assert ticked[-1]["n"] == 3
+
+    @pytest.mark.asyncio
+    async def test_on_tick_none_is_fine(self):
+        async def fetch():
+            return {"status": "done"}
+
+        result = await poll(
+            fetch=fetch,
+            is_done=lambda obj: obj["status"] == "done",
+            interval_s=0.05,
+            timeout_s=5.0,
+            on_tick=None,
+        )
+        assert result["status"] == "done"
 
     @pytest.mark.asyncio
     async def test_timeout_raises(self):

@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, cast
 from loguru import logger
 
 from config.config import (
-    BATCH_RETRIEVE_PROGRESS_LOG_EVERY,
     DEFAULT_BATCH_LOG_EVERY,
     DEFAULT_BATCH_ITEMS_LIMIT,
     DEFAULT_BATCH_POLL_SECONDS,
@@ -20,7 +19,7 @@ from config.config import (
     RETRIEVE_FORMATS_ALLOWED,
 )
 from src.batch_scraper import BatchScraper
-from utils.utils import write_json
+from utils.utils import is_stdout_path, make_progress, write_json
 
 RetrieveFormat = Literal["html", "markdown", "json"]
 _ALLOWED_FORMATS = set(RETRIEVE_FORMATS_ALLOWED)
@@ -121,33 +120,26 @@ async def poll_until_completed(
     poll_seconds: float,
     log_every_n_polls: int,
 ) -> Dict[str, Any]:
-    poll_i = 0
-    start = time.time()
-    last_completed: Optional[int] = None
-    last_total: Optional[int] = None
+    with make_progress() as progress_bar:
+        task = progress_bar.add_task(f"Batch {batch_id}", total=None)
 
-    while True:
-        poll_i += 1
-        progress = await client.get_batch_progress(batch_id)
+        while True:
+            bp = await client.get_batch_progress(batch_id)
 
-        should_log = poll_i % max(1, log_every_n_polls) == 0
-        changed = (progress.completed_urls != last_completed) or (
-            progress.total_urls != last_total
-        )
-        if should_log or changed or progress.is_completed:
-            elapsed = int(time.time() - start)
-            logger.info(
-                f"[{_ts()}] Batch {batch_id} status={progress.status} "
-                f"progress={progress.completed_urls}/{progress.total_urls} "
-                f"elapsed={elapsed}s"
-            )
-            last_completed = progress.completed_urls
-            last_total = progress.total_urls
+            if bp.total_urls > 0:
+                progress_bar.update(
+                    task,
+                    total=bp.total_urls,
+                    completed=bp.completed_urls,
+                    description=f"Batch {batch_id} [{bp.status}]",
+                )
+            else:
+                progress_bar.update(task, description=f"Batch {batch_id} [{bp.status}]")
 
-        if progress.is_completed:
-            break
+            if bp.is_completed:
+                break
 
-        await asyncio.sleep(poll_seconds)
+            await asyncio.sleep(poll_seconds)
 
     return await client.get_batch(batch_id)
 
@@ -158,45 +150,47 @@ async def collect_results_and_failures(
     *,
     retrieve_formats: List[RetrieveFormat],
     items_limit: int,
+    expected_completed: int = 0,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     results: List[Dict[str, Any]] = []
-    completed_count = 0
     size_exceeded_count = 0
     first_size_exceeded_ids: List[str] = []
 
-    async for item in client.iter_batch_items(
-        batch_id, status="completed", limit=items_limit
-    ):
-        completed_count += 1
-        retrieve_id = item.get("retrieve_id")
-        custom_id = item.get("custom_id")
-        url = item.get("url")
-
-        if not retrieve_id:
-            results.append(
-                {"custom_id": custom_id, "url": url, "error": "missing_retrieve_id"}
-            )
-            continue
-
-        if completed_count % BATCH_RETRIEVE_PROGRESS_LOG_EVERY == 0:
-            logger.info(
-                f"[{_ts()}] Retrieving content... {completed_count} completed items processed"
-            )
-
-        retrieved = await client.retrieve(retrieve_id, formats=retrieve_formats)
-        if isinstance(retrieved, dict) and retrieved.get("size_exceeded") is True:
-            size_exceeded_count += 1
-            if custom_id and len(first_size_exceeded_ids) < 3:
-                first_size_exceeded_ids.append(str(custom_id))
-
-        results.append(
-            {
-                "custom_id": custom_id,
-                "url": url,
-                "retrieve_id": retrieve_id,
-                "retrieved": retrieved,
-            }
+    with make_progress() as progress_bar:
+        task = progress_bar.add_task(
+            "Retrieving results",
+            total=expected_completed or None,
         )
+
+        async for item in client.iter_batch_items(
+            batch_id, status="completed", limit=items_limit
+        ):
+            retrieve_id = item.get("retrieve_id")
+            custom_id = item.get("custom_id")
+            url = item.get("url")
+
+            if not retrieve_id:
+                results.append(
+                    {"custom_id": custom_id, "url": url, "error": "missing_retrieve_id"}
+                )
+                progress_bar.advance(task)
+                continue
+
+            retrieved = await client.retrieve(retrieve_id, formats=retrieve_formats)
+            if isinstance(retrieved, dict) and retrieved.get("size_exceeded") is True:
+                size_exceeded_count += 1
+                if custom_id and len(first_size_exceeded_ids) < 3:
+                    first_size_exceeded_ids.append(str(custom_id))
+
+            results.append(
+                {
+                    "custom_id": custom_id,
+                    "url": url,
+                    "retrieve_id": retrieve_id,
+                    "retrieved": retrieved,
+                }
+            )
+            progress_bar.advance(task)
 
     if size_exceeded_count:
         id_hint = ""
@@ -214,6 +208,24 @@ async def collect_results_and_failures(
         failed_items.append(item)
 
     return results, failed_items
+
+
+def build_batch_payload(
+    items: List[Dict[str, str]],
+    *,
+    country: Optional[str] = None,
+    parser_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized: List[Dict[str, str]] = []
+    for it in items:
+        normalized.append({"url": it["url"], "custom_id": it.get("custom_id", it["url"])})
+
+    payload: Dict[str, Any] = {"items": normalized}
+    if country:
+        payload["country"] = country
+    if parser_id:
+        payload["parser"] = {"id": parser_id}
+    return payload
 
 
 async def run_batch_scrape(
@@ -255,11 +267,13 @@ async def run_batch_scrape(
             log_every_n_polls=log_every_n_polls,
         )
 
+        expected_completed = int(final_batch.get("completed_urls") or 0)
         results, failed_items = await collect_results_and_failures(
             client,
             batch_id,
             retrieve_formats=retrieve_formats,
             items_limit=items_limit,
+            expected_completed=expected_completed,
         )
 
         logger.info(
@@ -276,7 +290,8 @@ async def run_batch_scrape(
             "failed_items": failed_items,
         }
         write_json(output_json_path, payload)
-        logger.info(f"[{_ts()}] Saved: {output_json_path} (results={len(results)})")
+        if not is_stdout_path(output_json_path):
+            logger.info(f"[{_ts()}] Saved: {output_json_path} (results={len(results)})")
         return payload
 
 
@@ -302,5 +317,6 @@ async def run_batch_update(
     async with BatchScraper(api_token=api_token, base_url=base_url, timeout=timeout) as client:
         updated = await client.update_batch(batch_id=batch_id, metadata=normalized)
         write_json(output_json_path, updated)
-        logger.info(f"[{_ts()}] Saved: {output_json_path}")
+        if not is_stdout_path(output_json_path):
+            logger.info(f"[{_ts()}] Saved: {output_json_path}")
         return updated

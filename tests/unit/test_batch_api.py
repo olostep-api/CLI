@@ -4,15 +4,20 @@ import csv
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 from src.batch_api import (
+    build_batch_payload,
+    collect_results_and_failures,
     normalize_batch_metadata,
     parse_metadata_object,
     parse_retrieve_formats,
+    poll_until_completed,
     read_csv_items,
 )
+from src.batch_scraper import BatchProgress
 
 
 class TestParseRetrieveFormats:
@@ -96,6 +101,31 @@ class TestReadCsvItems:
         Path(f.name).unlink()
 
 
+class TestBuildBatchPayload:
+    def test_basic_items(self):
+        items = [
+            {"custom_id": "a", "url": "https://a.com"},
+            {"custom_id": "b", "url": "https://b.com"},
+        ]
+        payload = build_batch_payload(items)
+        assert len(payload["items"]) == 2
+        assert payload["items"][0] == {"custom_id": "a", "url": "https://a.com"}
+        assert "country" not in payload
+        assert "parser" not in payload
+
+    def test_with_country_and_parser(self):
+        items = [{"custom_id": "x", "url": "https://x.com"}]
+        payload = build_batch_payload(items, country="US", parser_id="p1")
+        assert payload["country"] == "US"
+        assert payload["parser"] == {"id": "p1"}
+
+    def test_omits_empty_optionals(self):
+        items = [{"custom_id": "x", "url": "https://x.com"}]
+        payload = build_batch_payload(items, country=None, parser_id=None)
+        assert "country" not in payload
+        assert "parser" not in payload
+
+
 class TestNormalizeBatchMetadata:
     def test_string_values_passthrough(self):
         assert normalize_batch_metadata({"team": "growth"}) == {"team": "growth"}
@@ -156,3 +186,90 @@ class TestParseMetadataObject:
     def test_non_object_raises(self):
         with pytest.raises(ValueError, match="must be a JSON object"):
             parse_metadata_object(metadata_json='"just a string"')
+
+
+class TestPollUntilCompleted:
+    @pytest.mark.asyncio
+    async def test_completes_with_progress_bar(self):
+        client = AsyncMock()
+        client.get_batch_progress = AsyncMock(
+            side_effect=[
+                BatchProgress(is_completed=False, status="in_progress", total_urls=5, completed_urls=2),
+                BatchProgress(is_completed=False, status="in_progress", total_urls=5, completed_urls=4),
+                BatchProgress(is_completed=True, status="completed", total_urls=5, completed_urls=5),
+            ]
+        )
+        client.get_batch = AsyncMock(return_value={"id": "b1", "status": "completed"})
+
+        result = await poll_until_completed(
+            client, "b1", poll_seconds=0.01, log_every_n_polls=1,
+        )
+        assert result == {"id": "b1", "status": "completed"}
+        assert client.get_batch_progress.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_immediate_completion(self):
+        client = AsyncMock()
+        client.get_batch_progress = AsyncMock(
+            return_value=BatchProgress(is_completed=True, status="completed", total_urls=1, completed_urls=1),
+        )
+        client.get_batch = AsyncMock(return_value={"id": "b2", "status": "completed"})
+
+        result = await poll_until_completed(
+            client, "b2", poll_seconds=0.01, log_every_n_polls=1,
+        )
+        assert result["status"] == "completed"
+        assert client.get_batch_progress.call_count == 1
+
+
+class TestCollectResultsAndFailures:
+    @pytest.mark.asyncio
+    async def test_collects_completed_and_failed(self):
+        completed_items = [
+            {"retrieve_id": "r1", "custom_id": "c1", "url": "https://a.com"},
+            {"retrieve_id": "r2", "custom_id": "c2", "url": "https://b.com"},
+        ]
+        failed_items = [
+            {"custom_id": "c3", "url": "https://c.com", "error": "timeout"},
+        ]
+
+        client = AsyncMock()
+
+        async def _iter_items(batch_id, *, status, limit):
+            items = completed_items if status == "completed" else failed_items
+            for item in items:
+                yield item
+
+        client.iter_batch_items = _iter_items
+        client.retrieve = AsyncMock(return_value={"markdown": "# Hello"})
+
+        results, failures = await collect_results_and_failures(
+            client, "b1",
+            retrieve_formats=["markdown"],
+            items_limit=10,
+            expected_completed=2,
+        )
+        assert len(results) == 2
+        assert results[0]["custom_id"] == "c1"
+        assert results[0]["retrieved"] == {"markdown": "# Hello"}
+        assert len(failures) == 1
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_retrieve_id(self):
+        client = AsyncMock()
+
+        async def _iter_items(batch_id, *, status, limit):
+            if status == "completed":
+                yield {"retrieve_id": None, "custom_id": "c1", "url": "https://a.com"}
+            # no failed items
+
+        client.iter_batch_items = _iter_items
+
+        results, failures = await collect_results_and_failures(
+            client, "b1",
+            retrieve_formats=["markdown"],
+            items_limit=10,
+        )
+        assert len(results) == 1
+        assert results[0]["error"] == "missing_retrieve_id"
+        assert len(failures) == 0
