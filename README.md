@@ -104,7 +104,7 @@ Runtime defaults live in `config/config.py`, including:
 - `DEFAULT_*_OUT_PATH`
 - Default polling intervals and output paths for each command
 
-If you need to target a different environment, update `API_BASE_URL` or `BATCH_BASE_URL` in [config/config.py](/home/mubashir/RB/Olostep/olostep_cli/config/config.py).
+If you need to target a different environment, update `API_BASE_URL` or `BATCH_BASE_URL` in [config/config.py]
 
 ---
 
