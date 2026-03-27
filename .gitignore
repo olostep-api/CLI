@@ -13,3 +13,12 @@ build/
 
 output/
 outputs/
+
+# PyInstaller
+*.spec.bak
+
+# npm wrapper – downloaded platform binaries
+npm/bin/olostep
+npm/bin/olostep.exe
+npm/bin/olostep-*
+npm/node_modules/

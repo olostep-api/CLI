@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -36,7 +37,14 @@ RETRIEVE_FORMATS_ALLOWED: Final = ("markdown", "html", "json")
 SCRAPE_FORMATS_ALLOWED: Final = ("html", "markdown", "text", "json", "raw_pdf", "screenshot")
 BATCH_RETRIEVE_PROGRESS_LOG_EVERY: Final = 50
 
-PROJECT_ROOT: Final = Path(__file__).resolve().parents[1]
+def _resolve_project_root() -> Path:
+    """Support PyInstaller frozen executables where __file__ is unreliable."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+PROJECT_ROOT: Final = _resolve_project_root()
 ENV_PATH: Final = PROJECT_ROOT / ENV_FILE_NAME
 
 
