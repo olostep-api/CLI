@@ -1,0 +1,32 @@
+{
+  "name": "olostep-cli",
+  "version": "0.1.0",
+  "description": "CLI for Olostep APIs: map, answer, scrape, crawl, batch-scrape — standalone binary, no Python needed",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/olostep-api/CLI.git"
+  },
+  "homepage": "https://www.olostep.com/",
+  "keywords": [
+    "olostep",
+    "scraping",
+    "crawling",
+    "cli",
+    "web-data",
+    "llm"
+  ],
+  "bin": {
+    "olostep": "./bin/olostep.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "files": [
+    "bin/olostep.js",
+    "scripts/postinstall.js"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}
