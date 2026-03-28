@@ -1,224 +1,321 @@
-# Olostep API CLI
+# Olostep CLI
 
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#prerequisites)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](#installation)
+[![npm](https://img.shields.io/badge/npm-olostep--cli-CB3837.svg)](https://www.npmjs.com/package/olostep-cli)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 
-Command-line interface for the [Olostep API](https://www.olostep.com/) — built for AI companies and agents that need reliable, cost-effective, real-time web data.
+Command-line interface for the [Olostep API](https://www.olostep.com/) — search, map, answer, scrape, crawl, and batch workflows from your terminal. Outputs are **structured JSON** (pretty-printed) so you can pipe them into `jq`, agents, and CI without writing a custom client first.
 
-Olostep CLI lets you search, scrape, and crawl the web directly from your terminal, turning complex, JavaScript-heavy websites into clean, structured, LLM-ready outputs without managing browsers, proxies, or anti-bot infrastructure.
-
-The CLI wraps core Olostep workflows like `search`, `map`, `answer`, `scrape`, `crawl`, `batch-scrape`, and `batch-update`, and writes structured results (JSON, Markdown, and more) to local files for debugging, automation, and downstream AI pipelines.
-
-Designed for modern AI use cases, it integrates seamlessly into agent workflows, data pipelines, and research automation.
-
-Built with [Typer](https://typer.tiangolo.com/) and aligned with the [Olostep documentation](https://docs.olostep.com/), the package exposes a simple and extensible `olostep` command for fast iteration and production use.
+The same CLI is available as a **standalone binary** (no Python required) via [npm](https://www.npmjs.com/package/olostep-cli), or from source with Python.
 
 ---
 
-## Table of Contents
+## Table of contents
 
-- [Objective](#objective)
-- [Prerequisites](#prerequisites)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [CLI Reference](#cli-reference)
-- [Output Layout](#output-layout)
-- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Authentication](#authentication)
+- [Quick start](#quick-start)
+- [Output, stdout, and agents](#output-stdout-and-agents)
+- [Commands](#commands)
+  - [`map`](#map--discover-urls)
+  - [`answer`](#answer--researched-answers)
+  - [`scrape`](#scrape--single-url)
+  - [`scrape-get`](#scrape-get--fetch-by-id)
+  - [`crawl`](#crawl--multi-page)
+  - [`batch-scrape`](#batch-scrape--csv)
+  - [`batch-update`](#batch-update--metadata)
+- [Default output paths](#default-output-paths)
+- [Global options](#global-options)
+- [Project structure](#project-structure)
 - [Development](#development)
 - [Security](#security)
-- [Olostep References](#olostep-references)
+- [References](#olostep-references)
 - [License](#license)
 
 ---
 
-## Objective
+## Installation
 
-This project helps you:
-- Run Olostep API workflows directly from the terminal.
-- Save consistent JSON outputs under `output/`.
-- Test map, answer, scrape, crawl, and batch flows without writing custom client code first.
-- Reuse one CLI for quick experiments, local automation, and API debugging.
+### npm (recommended — standalone binary)
 
-## Prerequisites
+Installs a platform-specific binary on `postinstall` (macOS arm64/x64, Linux x64, Windows x64). **Node.js 16+** is required only for install; the `olostep` command does not use Python.
 
-- Python 3.10+ installed locally.
-- An [Olostep](https://www.olostep.com/) account with a valid API key or API token.
-- `pip` or another Python package installer.
+```bash
+npm install -g olostep-cli
+```
 
-## Features
+Run without a global install:
 
-- `map`: Discover URLs from a site with [Olostep Maps](https://docs.olostep.com/features/maps/maps).
-- `answer`: Create and poll Olostep Answers responses.
-- `scrape`: Scrape a single URL in one or more formats.
-- `scrape-get`: Fetch a scrape response by scrape ID.
-- `crawl`: Crawl a site, poll until completion, list pages, and retrieve content.
-- `batch-scrape`: Submit a CSV of URLs to [Olostep Batch](https://docs.olostep.com/features/batches/batches) and retrieve completed items.
-- `batch-update`: Update metadata for an existing batch.
+```bash
+npx -y olostep-cli@latest --help
+```
 
----
+If the binary failed to download, reinstall or check that a [GitHub release](https://github.com/olostep-api/CLI/releases) exists for your package version and platform.
 
-## Quick Start
+### Python (from this repository)
 
-Create and activate a virtual environment, then install the package in editable mode:
+For development or when you want to run the Typer app directly:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -U pip
 pip install -e .
 ```
 
-Create `.env` in the project root:
+The console script is `olostep`. You can also run `python main.py ...`.
+
+Package metadata: see [`pyproject.toml`](pyproject.toml) (`olostep-api-cli`).
+
+---
+
+## Authentication
+
+Set one of these (process environment or a `.env` file next to the working directory / binary):
+
+| Variable | Description |
+| -------- | ----------- |
+| `OLOSTEP_API_KEY` | API key (preferred) |
+| `OLOSTEP_API_TOKEN` | Alternative token name |
+
+Create keys in the [Olostep API Keys dashboard](https://www.olostep.com/dashboard/api-keys).
+
+Batch commands resolve the token via `resolve_api_key()`; map/answer/scrape/crawl use the same credentials through [`config/config.py`](config/config.py). Defaults include `API_BASE_URL` (`https://api.olostep.com/v1`) and batch base URL — change there if you need another environment.
+
+---
+
+## Quick start
 
 ```bash
-OLOSTEP_API_KEY=your_olostep_api_key_here
-```
+export OLOSTEP_API_KEY=your_key_here
 
-This repo also accepts `OLOSTEP_API_TOKEN`. You can create an API key from the [Olostep API Keys dashboard](https://www.olostep.com/dashboard/api-keys).
-
-Run the CLI:
-
-```bash
 olostep --help
-olostep map "https://example.com" --top-n 20 --out output/map.json
-```
-
-You can also run the same commands with `python main.py ...`.
-
----
-
-## Configuration
-
-The CLI loads credentials from `.env` or the process environment:
-
-- `OLOSTEP_API_KEY`
-- `OLOSTEP_API_TOKEN`
-
-Runtime defaults live in `config/config.py`, including:
-
-- `API_BASE_URL`
-- `BATCH_BASE_URL`
-- `DEFAULT_HTTP_TIMEOUT_S`
-- `DEFAULT_*_OUT_PATH`
-- Default polling intervals and output paths for each command
-
-If you need to target a different environment, update `API_BASE_URL` or `BATCH_BASE_URL` in [config/config.py]
-
----
-
-## Usage
-
-Map a site:
-
-```bash
-olostep map "https://example.com" --top-n 20 --out output/map.json
-```
-
-Create and poll an answer:
-
-```bash
-olostep answer "Summarize this company" --out output/answer.json
-```
-
-Create an answer with a JSON output shape:
-
-```bash
-olostep answer "Extract company facts" --json-format '{"company":"","country":""}' --out output/answer.json
-```
-
-Scrape one URL:
-
-```bash
-olostep scrape "https://example.com/article" --formats markdown,text --out output/scrape.json
-```
-
-Fetch an existing scrape:
-
-```bash
-olostep scrape-get "<SCRAPE_ID>" --out output/scrape_get.json
-```
-
-Crawl a site and retrieve page content:
-
-```bash
-olostep crawl "https://example.com" --max-pages 20 --formats markdown,html --out output/crawl_results.json
-```
-
-Batch scrape from CSV:
-
-```bash
-olostep batch-scrape "data.csv" --formats markdown,html --out output/batch_results.json
-```
-
-Batch scrape with a parser:
-
-```bash
-olostep batch-scrape "data.csv" --parser-id "<PARSER_ID>" --out output/batch_results.json
-```
-
-Update batch metadata:
-
-```bash
-olostep batch-update "<BATCH_ID>" --metadata-json '{"team":"growth"}' --out output/batch_update.json
+olostep map "https://example.com" --top-n 20
+olostep scrape "https://example.com" --formats markdown,html
 ```
 
 ---
 
-## CLI Reference
+## Output, stdout, and agents
 
-Use `--help` on the root command or any subcommand:
+- **`--out <path>`** — Write JSON results to a file. Parent directories are created automatically.
+- **`--out -`** — Write **only** the JSON result to **stdout** (UTF-8, indented). Use this for pipelines, subprocess capture in agents, and tools that expect machine-readable output on stdout.
+- **Logs** (e.g. `logger.info`, progress) go to **stderr**, so you can redirect or ignore them while keeping clean JSON on stdout.
+
+Examples:
 
 ```bash
-olostep --help
-olostep map --help
-olostep answer --help
-olostep scrape --help
-olostep scrape-get --help
-olostep crawl --help
-olostep batch-scrape --help
-olostep batch-update --help
+olostep map "https://example.com" --top-n 50 --out - | jq '.urls[:10]'
+olostep answer "What is Olostep?" --out - | jq .result
+olostep scrape "https://example.com" --out - | jq .result.markdown_content
 ```
 
-Compatibility notes:
-- `map --limit` was removed. Use `--top-n`.
-- `answer --model` was removed. Use `--json-format`.
+CI-style usage:
+
+```bash
+export OLOSTEP_API_KEY="${{ secrets.OLOSTEP_API_KEY }}"
+olostep scrape "https://docs.example.com" --out result.json
+```
 
 ---
 
-## Output Layout
+## Commands
 
-Commands write JSON to `output/` by default:
+Run `olostep <command> --help` for full option text. HTTP timeout for most API-backed commands: `--timeout` (seconds).
 
-- `output/map.json`
-- `output/answer.json`
-- `output/scrape.json`
-- `output/scrape_get.json`
-- `output/crawl_results.json`
-- `output/batch_results.json`
-- `output/batch_update.json`
+### `map` — discover URLs
+
+Map a site to discover URLs (Olostep Maps).
+
+| Option | Description |
+| ------ | ----------- |
+| `--out` | Output path or `-` for stdout |
+| `--top-n` | Max URLs to return |
+| `--search-query` | Optional query to guide discovery |
+| `--include-subdomain` / `--no-include-subdomain` | Include subdomains |
+| `--include-url` | Repeatable URL patterns to include |
+| `--exclude-url` | Repeatable URL patterns to exclude |
+| `--cursor` | Pagination cursor |
+| `--timeout` | HTTP timeout (s) |
+
+```bash
+olostep map "https://example.com" --top-n 100 --search-query "blog"
+olostep map "https://example.com" --include-subdomain --out - | jq '.urls[:5]'
+```
+
+**Compatibility:** `--limit` was removed — use `--top-n`.
 
 ---
 
-## Project Structure
+### `answer` — researched answers
+
+Ask a question; the CLI polls until the answer job completes.
+
+| Option | Description |
+| ------ | ----------- |
+| `--out` | Output path or `-` |
+| `--json-format` | Optional JSON shape / schema hint (string or JSON object string) |
+| `--poll-interval` | Polling interval (seconds) |
+| `--poll-timeout` | Max time to wait (seconds) |
+| `--timeout` | HTTP timeout (s) |
+
+```bash
+olostep answer "Summarize this company's product" --out output/answer.json
+olostep answer "Extract company facts" --json-format '{"company":"","country":""}' --out -
+```
+
+**Compatibility:** `--model` was removed — use `--json-format`.
+
+---
+
+### `scrape` — single URL
+
+Scrape one URL in one or more formats.
+
+**Formats** (comma-separated): `html`, `markdown`, `text`, `json`, `raw_pdf`, `screenshot`.
+
+| Option | Description |
+| ------ | ----------- |
+| `--out` | Output path or `-` |
+| `--formats` | Comma-separated formats (default: `markdown`) |
+| `--country` | Optional country code |
+| `--wait-before-scraping` | Wait before scrape (milliseconds) |
+| `--payload-json` | Advanced scrape options as a JSON **object** string |
+| `--payload-file` | Same as above, from a JSON file (mutually exclusive with `--payload-json`) |
+| `--timeout` | HTTP timeout (s) |
+
+```bash
+olostep scrape "https://example.com/article" --formats markdown,text
+olostep scrape "https://example.com" --country US --wait-before-scraping 2000
+olostep scrape "https://example.com" --payload-file advanced.json --out - | jq .
+```
+
+---
+
+### `scrape-get` — fetch by ID
+
+Retrieve a previous scrape by ID.
+
+```bash
+olostep scrape-get "scrape_abc123" --out output/scrape_get.json
+olostep scrape-get "scrape_abc123" --out - | jq .result.markdown_content
+```
+
+---
+
+### `crawl` — multi-page
+
+Start a crawl, poll until finished, then retrieve page contents.
+
+**Retrieve formats** (comma-separated): `markdown`, `html`, `json`.
+
+| Option | Description |
+| ------ | ----------- |
+| `--out` | Output path or `-` |
+| `--max-pages` | Maximum pages to crawl |
+| `--max-depth` | Optional max depth |
+| `--include-subdomain` / `--no-include-subdomain` | Subdomains |
+| `--include-external` / `--no-include-external` | External domains |
+| `--include-url` / `--exclude-url` | Repeatable path/URL patterns |
+| `--search-query` / `--top-n` | Optional discovery filter and cap |
+| `--webhook` | Optional webhook URL |
+| `--crawl-timeout` | Crawl timeout (seconds) |
+| `--follow-robots-txt` / `--ignore-robots-txt` | robots.txt |
+| `--formats` | Retrieve formats |
+| `--pages-limit` | Page size for crawl pages API |
+| `--pages-search-query` | Filter when listing pages |
+| `--poll-seconds` / `--poll-timeout` | Polling |
+| `--timeout` | HTTP timeout (s) |
+| `--dry-run` | Print API payload JSON and exit (no request) |
+
+```bash
+olostep crawl "https://docs.example.com" --max-pages 50 --formats markdown,html
+olostep crawl "https://example.com" --max-pages 10 --dry-run
+```
+
+---
+
+### `batch-scrape` — CSV
+
+Submit many URLs from a CSV with columns **`custom_id`/`id`** and **`url`**. Polls until completion.
+
+| Option | Description |
+| ------ | ----------- |
+| `--out` | Output path or `-` |
+| `--formats` | `markdown`, `html`, `json` (comma-separated) |
+| `--country` | Optional country code |
+| `--parser-id` | Optional parser for structured extraction |
+| `--poll-seconds` | Poll interval |
+| `--log-every` | Log every N polls |
+| `--items-limit` | Batch items page size (API often suggests 10–50) |
+| `--dry-run` | Print payload JSON and exit |
+
+```bash
+olostep batch-scrape urls.csv --formats markdown,html --country US
+olostep batch-scrape urls.csv --parser-id "<PARSER_ID>" --out results.json
+```
+
+---
+
+### `batch-update` — metadata
+
+Update metadata on an existing batch. **One of** `--metadata-json` or `--metadata-file` is required (JSON object).
+
+```bash
+olostep batch-update "batch_abc123" --metadata-json '{"team":"growth"}'
+olostep batch-update "batch_abc123" --metadata-file meta.json --out -
+```
+
+---
+
+## Default output paths
+
+If you omit `--out`, JSON is written under `output/`:
+
+| Command | Default file |
+| ------- | ------------ |
+| `map` | `output/map.json` |
+| `answer` | `output/answer.json` |
+| `scrape` | `output/scrape.json` |
+| `scrape-get` | `output/scrape_get.json` |
+| `crawl` | `output/crawl_results.json` |
+| `batch-scrape` | `output/batch_results.json` |
+| `batch-update` | `output/batch_update.json` |
+
+---
+
+## Global options
+
+| Option | Description |
+| ------ | ----------- |
+| `-V`, `--version` | Print CLI version and exit |
+| `-h`, `--help` | Help (Typer / Rich) |
+
+---
+
+## Project structure
 
 ```text
 .
-├── main.py                # Typer CLI entrypoint and command definitions
-├── pyproject.toml         # Package metadata and `olostep` console script
+├── main.py                 # Typer CLI entrypoint
+├── pyproject.toml          # Python package + `olostep` script
+├── olostep.spec            # PyInstaller spec for release binaries
+├── npm/
+│   ├── package.json        # olostep-cli on npm
+│   ├── bin/olostep.js      # Node shim → native binary
+│   └── scripts/postinstall.js
 ├── config/
-│   └── config.py          # Environment loading, defaults, and base URLs
+│   └── config.py           # Env, defaults, base URLs
 ├── src/
-│   ├── api_client.py      # Shared API client for map, answer, scrape, and crawl
-│   ├── map_api.py         # Maps command implementation
-│   ├── answer_api.py      # Answers command implementation
-│   ├── scrape_api.py      # Scrape and scrape-get implementations
-│   ├── crawl_api.py       # Crawl execution and page retrieval
-│   ├── batch_api.py       # Batch scrape and batch update workflows
-│   └── batch_scraper.py   # Low-level batch client
+│   ├── api_client.py
+│   ├── map_api.py
+│   ├── answer_api.py
+│   ├── scrape_api.py
+│   ├── crawl_api.py
+│   ├── batch_api.py
+│   └── batch_scraper.py
 └── utils/
-    └── utils.py           # JSON writing and polling helpers
+    └── utils.py            # JSON output, stdout `-`, polling helpers
 ```
 
 ---
@@ -229,30 +326,31 @@ Commands write JSON to `output/` by default:
 python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-pip install -e .
+pip install -e ".[test]"
+pytest
 olostep --help
 ```
+
+Release binaries are built with PyInstaller (`pip install -e ".[build]"`); see [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
 ---
 
 ## Security
 
-- Do not commit `.env`.
-- Treat API keys as secrets and rotate them if they are exposed.
+- Do not commit `.env` or API keys.
+- Rotate keys if they are exposed.
 
 ---
 
-## Olostep References
+## Olostep references
 
-- [Olostep Website](https://www.olostep.com/)
-- [Olostep Documentation](https://docs.olostep.com/)
-- [Olostep Authentication Guide](https://docs.olostep.com/get-started/authentication)
-- [Olostep Maps Guide](https://docs.olostep.com/features/maps/maps)
-- [Olostep Batch Guide](https://docs.olostep.com/features/batches/batches)
-- [Olostep Parsers Documentation](https://docs.olostep.com/features/structured-content/parsers)
+- [Olostep](https://www.olostep.com/)
+- [Documentation](https://docs.olostep.com/)
+- [Authentication](https://docs.olostep.com/get-started/authentication)
+- [Maps](https://docs.olostep.com/features/maps/maps)
+- [Batches](https://docs.olostep.com/features/batches/batches)
+- [Parsers](https://docs.olostep.com/features/structured-content/parsers)
 
 ## License
 
-This project is licensed under the MIT License.
-
-See [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
