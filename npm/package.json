@@ -23,6 +23,7 @@
     "postinstall": "node scripts/postinstall.js"
   },
   "files": [
+    "README.md",
     "bin/olostep.js",
     "scripts/postinstall.js"
   ],
