@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import json
+import os
+import platform
 import sys
 from dataclasses import dataclass
-import os
 from pathlib import Path
 from typing import Final
 
 ENV_FILE_NAME: Final = ".env"
 ENV_API_KEY: Final = "OLOSTEP_API_KEY"
 ENV_API_TOKEN: Final = "OLOSTEP_API_TOKEN"
+ENV_API_BASE_URL: Final = "OLOSTEP_API_BASE_URL"
+ENV_CLI_AUTH_PAGE_URL: Final = "OLOSTEP_CLI_AUTH_PAGE_URL"
+ENV_CLI_CONFIG_DIR: Final = "OLOSTEP_CLI_CONFIG_DIR"
+ENV_OLOSTEP_ENV: Final = "OLOSTEP_ENV"
+ENV_GENERIC_ENV: Final = "ENV"
+CREDENTIALS_FILE_NAME: Final = "credentials.json"
 
 DEFAULT_HTTP_TIMEOUT_S: Final = 60.0
 API_BASE_URL: Final = "https://api.olostep.com/v1"
+DEFAULT_CLI_AUTH_PAGE_URL: Final = "https://www.olostep.com/cli-auth"
+DEFAULT_CLI_AUTH_PAGE_URL_DEV: Final = "http://localhost:1660/cli-auth"
 BATCH_BASE_URL: Final = "https://api.olostep.com"
 DEFAULT_ANSWER_POLL_INTERVAL_S: Final = 1.5
 DEFAULT_ANSWER_POLL_TIMEOUT_S: Final = 300.0
@@ -46,6 +56,48 @@ def _resolve_project_root() -> Path:
 
 PROJECT_ROOT: Final = _resolve_project_root()
 ENV_PATH: Final = PROJECT_ROOT / ENV_FILE_NAME
+
+
+def get_olostep_config_dir() -> Path:
+    """
+    Per-user config directory (matches typical Node `os.platform()` layout).
+
+    - macOS: ~/Library/Application Support/olostep-cli
+    - Windows: ~/AppData/Roaming/olostep-cli
+    - Linux and others: ~/.config/olostep-cli
+
+    Override with OLOSTEP_CLI_CONFIG_DIR (e.g. for tests).
+    """
+    override = os.getenv(ENV_CLI_CONFIG_DIR, "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    home = Path.home()
+    system = platform.system()
+    if system == "Darwin":
+        return home / "Library" / "Application Support" / "olostep-cli"
+    if system == "Windows":
+        return home / "AppData" / "Roaming" / "olostep-cli"
+    return home / ".config" / "olostep-cli"
+
+
+def get_credentials_path() -> Path:
+    """Path to credentials JSON written by `olostep login` (default)."""
+    return get_olostep_config_dir() / CREDENTIALS_FILE_NAME
+
+
+def read_credentials_api_key(path: Path | None = None) -> str | None:
+    """Read api_key from credentials.json; returns None if missing or invalid."""
+    p = path or get_credentials_path()
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    v = (data.get("api_key") or data.get("apiKey") or "").strip()
+    return v or None
 
 
 def _strip_wrapping_quotes(value: str) -> str:
@@ -83,17 +135,58 @@ def load_env_file(path: Path = ENV_PATH) -> None:
 def resolve_api_key(api_key: str | None = None) -> str:
     load_env_file()
     key = (api_key or os.getenv(ENV_API_KEY) or os.getenv(ENV_API_TOKEN) or "").strip()
-    if not key:
-        raise ValueError(
-            f"Missing API key. Set {ENV_API_KEY} or {ENV_API_TOKEN} in environment/.env."
-        )
-    return key
+    if key:
+        return key
+    cred = read_credentials_api_key()
+    if cred:
+        return cred
+    raise ValueError(
+        f"Missing API key. Set {ENV_API_KEY} or {ENV_API_TOKEN}, add a project `.env`, "
+        f"or run `olostep login` (saves {CREDENTIALS_FILE_NAME} under the app config directory)."
+    )
 
 
 def resolve_timeout_s(timeout_s: float | None = None) -> float:
     if timeout_s is not None:
         return float(timeout_s)
     return DEFAULT_HTTP_TIMEOUT_S
+
+
+def get_cli_auth_api_base(explicit: str | None = None) -> str:
+    """API root for CLI browser auth (`/status`, etc.); does not require an API key."""
+    raw = (explicit or os.getenv(ENV_API_BASE_URL) or API_BASE_URL).strip().rstrip("/")
+    if not raw:
+        raise ValueError("Missing CLI auth API base URL.")
+    if _is_placeholder(raw):
+        raise ValueError(f"Invalid CLI auth API base URL placeholder: {raw}.")
+    return raw
+
+
+def _default_cli_auth_page_url_for_environment() -> str:
+    """Production www URL unless OLOSTEP_ENV/ENV is development-like (matches local Next dev server)."""
+    mode = (
+        os.getenv(ENV_OLOSTEP_ENV) or os.getenv(ENV_GENERIC_ENV) or ""
+    ).strip().lower()
+    if mode in ("development", "dev", "local"):
+        return DEFAULT_CLI_AUTH_PAGE_URL_DEV
+    return DEFAULT_CLI_AUTH_PAGE_URL
+
+
+def get_cli_auth_page_url(explicit: str | None = None) -> str:
+    """Authorize page URL opened in the browser (query + hash appended by the CLI)."""
+    if explicit and explicit.strip():
+        raw = explicit.strip().rstrip("/")
+    else:
+        from_env = os.getenv(ENV_CLI_AUTH_PAGE_URL, "").strip()
+        if from_env:
+            raw = from_env.rstrip("/")
+        else:
+            raw = _default_cli_auth_page_url_for_environment().rstrip("/")
+    if not raw:
+        raise ValueError("Missing CLI auth page URL.")
+    if _is_placeholder(raw):
+        raise ValueError(f"Invalid CLI auth page URL placeholder: {raw}.")
+    return raw
 
 
 def get_batch_base_url(explicit_base_url: str | None = None) -> str:

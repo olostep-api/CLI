@@ -17,6 +17,7 @@ The same CLI is available as a **standalone binary** (no Python required) via [n
 - [Quick start](#quick-start)
 - [Output, stdout, and agents](#output-stdout-and-agents)
 - [Commands](#commands)
+  - [`login`](#login--browser-auth)
   - [`map`](#map--discover-urls)
   - [`answer`](#answer--researched-answers)
   - [`scrape`](#scrape--single-url)
@@ -71,14 +72,32 @@ Package metadata: see [`pyproject.toml`](pyproject.toml) (`olostep-api-cli`).
 
 ## Authentication
 
-Set one of these (process environment or a `.env` file next to the working directory / binary):
+The CLI resolves your API key in this order:
+
+1. Explicit `OLOSTEP_API_KEY` or `OLOSTEP_API_TOKEN` in the process environment  
+2. A project **`.env`** next to the package (loaded with `setdefault`, so existing env wins)  
+3. **`credentials.json`** in the per-user config directory (written by **`olostep login`** by default)
+
+Config directory layout (override entirely with **`OLOSTEP_CLI_CONFIG_DIR`**):
+
+| OS | Default directory |
+| -- | ----------------- |
+| macOS | `~/Library/Application Support/olostep-cli` |
+| Windows | `%USERPROFILE%\AppData\Roaming\olostep-cli` |
+| Linux / others | `~/.config/olostep-cli` |
+
+The credentials file is `credentials.json` with `{"api_key": "..."}`.
 
 | Variable | Description |
 | -------- | ----------- |
 | `OLOSTEP_API_KEY` | API key (preferred) |
 | `OLOSTEP_API_TOKEN` | Alternative token name |
+| `OLOSTEP_CLI_CONFIG_DIR` | Override the config directory (parent of `credentials.json`) |
+| `OLOSTEP_API_BASE_URL` | API root for `login` and API calls (default: `https://api.olostep.com/v1`) |
+| `OLOSTEP_CLI_AUTH_PAGE_URL` | Authorize page base for `olostep login` (overrides env-based default below) |
+| `OLOSTEP_ENV` or `ENV` | Set to `development`, `dev`, or `local` to default the authorize link to `http://localhost:1660/cli-auth` (Next.js dev port). Otherwise the default is `https://www.olostep.com/cli-auth`. |
 
-Create keys in the [Olostep API Keys dashboard](https://www.olostep.com/dashboard/api-keys).
+Create keys in the [Olostep API Keys dashboard](https://www.olostep.com/dashboard/api-keys), or run **`olostep login`** to sign in in the browser and store the key in **`credentials.json`**.
 
 Batch commands resolve the token via `resolve_api_key()`; map/answer/scrape/crawl use the same credentials through [`config/config.py`](config/config.py). Defaults include `API_BASE_URL` (`https://api.olostep.com/v1`) and batch base URL — change there if you need another environment.
 
@@ -122,6 +141,27 @@ olostep scrape "https://docs.example.com" --out result.json
 ## Commands
 
 Run `olostep <command> --help` for full option text. HTTP timeout for most API-backed commands: `--timeout` (seconds).
+
+### `login` — browser auth
+
+Opens the Olostep CLI authorize page (or prints the URL with `--no-browser`). After you sign in and click **Authorize**, the CLI polls `POST /status` and saves the key to **`credentials.json`** under the OS-specific config directory (see [Authentication](#authentication)). Use **`--env-file`** to write a project `.env` instead.
+
+| Option | Description |
+| ------ | ----------- |
+| `--poll-seconds` | Interval between status polls (default: `3`) |
+| `--timeout` | Max seconds to wait for authorization (default: `600`) |
+| `--no-browser` | Print the authorize URL instead of opening a browser |
+| `--env-file` | Write `OLOSTEP_API_KEY=` to this `.env` file instead of `credentials.json` |
+
+Set `NO_BROWSER=1` in the environment for the same effect as `--no-browser` (useful over SSH).
+
+```bash
+olostep login
+olostep login --no-browser   # copy the printed URL into a local browser
+olostep login --env-file ./.env
+```
+
+---
 
 ### `map` — discover URLs
 

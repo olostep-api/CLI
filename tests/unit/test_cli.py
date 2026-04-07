@@ -350,6 +350,46 @@ class TestBatchScrapeCommand:
             Path(csv_path).unlink()
 
 
+class TestLoginCommand:
+    def test_help(self):
+        result = runner.invoke(app, ["login", "--help"])
+        assert result.exit_code == 0
+        assert "browser" in result.output.lower() or "authorize" in result.output.lower()
+
+    def test_login_writes_env(self):
+        with patch("main.run_browser_login", return_value="k_test_123") as mock_login, tempfile.TemporaryDirectory() as d:
+            env_p = Path(d) / ".env"
+            result = runner.invoke(
+                app,
+                [
+                    "login",
+                    "--no-browser",
+                    "--env-file",
+                    str(env_p),
+                ],
+            )
+            assert result.exit_code == 0
+            mock_login.assert_called_once()
+            text = env_p.read_text(encoding="utf-8")
+            assert "OLOSTEP_API_KEY=k_test_123" in text
+
+    def test_login_writes_credentials_json(self):
+        with patch("main.run_browser_login", return_value="k_cred_99") as mock_login, tempfile.TemporaryDirectory() as d:
+            cred = Path(d) / "credentials.json"
+            with patch("main.get_credentials_path", return_value=cred):
+                result = runner.invoke(
+                    app,
+                    [
+                        "login",
+                        "--no-browser",
+                    ],
+                )
+            assert result.exit_code == 0
+            mock_login.assert_called_once()
+            data = json.loads(cred.read_text(encoding="utf-8"))
+            assert data["api_key"] == "k_cred_99"
+
+
 class TestBatchUpdateCommand:
     def test_help(self):
         result = runner.invoke(app, ["batch-update", "--help"])
