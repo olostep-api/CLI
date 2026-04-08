@@ -30,21 +30,44 @@ from config.config import (
     DEFAULT_SCRAPE_GET_OUT_PATH,
     DEFAULT_SCRAPE_OUT_PATH,
     Settings,
+    get_cli_auth_api_base,
+    get_cli_auth_page_url,
+    get_credentials_path,
+    load_env_file,
     resolve_api_key,
 )
 from src.answer_api import run_answer
 from src.api_client import OlostepAPI
+from src.cli_auth import (
+    CliAuthError,
+    merge_env_api_key,
+    run_browser_login,
+    save_credentials_json,
+)
 from src.batch_api import build_batch_payload, parse_retrieve_formats, read_csv_items, run_batch_scrape, run_batch_update
 from src.crawl_api import build_crawl_payload, parse_crawl_retrieve_formats, run_crawl
 from src.map_api import run_map
 from src.scrape_api import parse_scrape_formats, run_scrape, run_scrape_get
+from src.skills_install import (
+    CLI_LOCAL_SKILLS_DIR,
+    DEFAULT_CANONICAL_DIR,
+    DEFAULT_LOCKFILE,
+    InstallOptions,
+    RemoveOptions,
+    run_install as run_skills_install,
+    run_remove as run_skills_remove,
+)
 from utils.utils import is_stdout_path, write_json
 
 app = typer.Typer(
     add_completion=False,
     rich_markup_mode="rich",
-    help="Olostep CLI: map, answer, scrape, scrape-get, crawl, batch-scrape, batch-update",
+    help="Olostep CLI: login, map, answer, scrape, scrape-get, crawl, batch-scrape, batch-update",
 )
+add_app = typer.Typer(help="Add resources to local agent environments.")
+app.add_typer(add_app, name="add")
+remove_app = typer.Typer(help="Remove resources from local agent environments.")
+app.add_typer(remove_app, name="remove")
 
 __version__ = "0.1.0"
 
@@ -72,6 +95,200 @@ def _make_api(timeout_s: float) -> OlostepAPI:
 
 def _get_token() -> str:
     return resolve_api_key()
+
+
+@app.command("login")
+def login_cmd(
+    poll_seconds: float = typer.Option(
+        3.0,
+        "--poll-seconds",
+        help="Interval between POST /status polls",
+    ),
+    timeout_s: float = typer.Option(
+        600.0,
+        "--timeout",
+        help="Give up after this many seconds waiting for authorization",
+    ),
+    no_browser: bool = typer.Option(
+        False,
+        "--no-browser",
+        help="Print the authorize URL instead of opening a browser",
+    ),
+    env_file: Optional[str] = typer.Option(
+        None,
+        "--env-file",
+        help="Write API key to this .env file instead of the default credentials.json",
+    ),
+):
+    """Sign in via browser and save the API key (default: OS config dir credentials.json).
+
+    Opens the Olostep CLI authorize page; after you click Authorize, the CLI polls until your key is ready.
+    """
+    _run_login_flow(
+        poll_seconds=poll_seconds,
+        timeout_s=timeout_s,
+        no_browser=no_browser,
+        env_file=env_file,
+    )
+
+
+@add_app.command("skills")
+def add_skills_cmd(
+    login: bool = typer.Option(False, "--login", help="Run `olostep login` flow before installing skills."),
+    source: str = typer.Option(str(CLI_LOCAL_SKILLS_DIR), "--source", help="Skills source directory (default: CLI bundled skills)."),
+    cli_local_dir: str = typer.Option(str(CLI_LOCAL_SKILLS_DIR), "--cli-local-dir", help="CLI-local skills copy destination."),
+    agent: Optional[List[str]] = typer.Option(None, "--agent", help="Install for this agent only (repeatable)."),
+    all_agents: bool = typer.Option(True, "--all-agents/--no-all-agents", help="Install for all detected agents."),
+    global_install: bool = typer.Option(True, "--global/--no-global", help="Install into global agent skills directories."),
+    canonical_dir: str = typer.Option(str(DEFAULT_CANONICAL_DIR), "--canonical-dir", help="Canonical skills directory."),
+    agent_skills_dir: Optional[str] = typer.Option(None, "--agent-skills-dir", help="Override target skills directory (non-global mode)."),
+    skill: Optional[List[str]] = typer.Option(None, "--skill", help="Only install these skill names (repeatable)."),
+    exclude: Optional[List[str]] = typer.Option(None, "--exclude", help="Exclude these skill names (repeatable)."),
+    overwrite: bool = typer.Option(True, "--overwrite/--no-overwrite", help="Replace existing installed skills."),
+    link_mode: str = typer.Option("auto", "--link-mode", help="Agent install mode: auto, symlink, copy."),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON output."),
+):
+    """Add Olostep skills from local plugin into agent skill directories."""
+    if link_mode not in {"auto", "symlink", "copy"}:
+        raise typer.BadParameter("--link-mode must be one of: auto, symlink, copy", param_hint="--link-mode")
+    if agent_skills_dir and global_install:
+        raise typer.BadParameter("--agent-skills-dir requires --no-global", param_hint="--agent-skills-dir")
+    if not global_install and not agent_skills_dir:
+        raise typer.BadParameter("Use --agent-skills-dir when running with --no-global", param_hint="--agent-skills-dir")
+
+    if login:
+        _run_login_flow(
+            poll_seconds=3.0,
+            timeout_s=600.0,
+            no_browser=False,
+            env_file=None,
+        )
+
+    options = InstallOptions(
+        source=Path(source).expanduser(),
+        cli_local_dir=Path(cli_local_dir).expanduser(),
+        canonical_dir=Path(canonical_dir).expanduser(),
+        lockfile_path=DEFAULT_LOCKFILE,
+        agent=agent or [],
+        all_agents=all_agents,
+        global_install=global_install,
+        agent_skills_dir=Path(agent_skills_dir).expanduser() if agent_skills_dir else None,
+        skill=skill or [],
+        exclude=exclude or [],
+        dry_run=False,
+        overwrite=overwrite,
+        link_mode=link_mode,  # type: ignore[arg-type]
+        yes=True,
+    )
+    try:
+        result = run_skills_install(options)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except OSError as exc:
+        raise typer.BadParameter(f"File operation failed: {exc}") from exc
+
+    if as_json:
+        print(json.dumps(result, indent=2, default=str))
+        raise typer.Exit()
+
+    typer.secho("")
+    typer.secho("  ✓  Skills installation finished.", fg="green", bold=True)
+    typer.secho(f"  Source: {result['sync']['plugin_source_dir']}", dim=True)
+    typer.secho(f"  CLI local copy: {result['sync']['cli_local_dir']}", dim=True)
+    typer.secho(f"  Canonical dir: {result['canonical_dir']}", dim=True)
+    typer.secho(f"  Installed skills: {', '.join(result['selected_skills'])}", dim=True)
+    if result["targets"]:
+        typer.secho(f"  Targets: {', '.join(result['targets'])}", dim=True)
+    else:
+        typer.secho("  Targets: none", dim=True)
+    typer.secho("")
+
+
+@remove_app.command("skills")
+def remove_skills_cmd(
+    agent: Optional[List[str]] = typer.Option(None, "--agent", help="Remove from this agent only (repeatable)."),
+    all_agents: bool = typer.Option(True, "--all-agents/--no-all-agents", help="Remove from all detected agents."),
+    canonical_dir: str = typer.Option(str(DEFAULT_CANONICAL_DIR), "--canonical-dir", help="Canonical skills directory."),
+    agent_skills_dir: Optional[str] = typer.Option(None, "--agent-skills-dir", help="Override target skills directory."),
+    skill: Optional[List[str]] = typer.Option(None, "--skill", help="Only remove these skill names (repeatable)."),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON output."),
+):
+    """Remove installed Olostep skills from canonical and agent directories."""
+    options = RemoveOptions(
+        canonical_dir=Path(canonical_dir).expanduser(),
+        lockfile_path=DEFAULT_LOCKFILE,
+        agent=agent or [],
+        all_agents=all_agents,
+        agent_skills_dir=Path(agent_skills_dir).expanduser() if agent_skills_dir else None,
+        skill=skill or [],
+        dry_run=False,
+        yes=True,
+    )
+    try:
+        result = run_skills_remove(options)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except OSError as exc:
+        raise typer.BadParameter(f"File operation failed: {exc}") from exc
+
+    if as_json:
+        print(json.dumps(result, indent=2, default=str))
+        raise typer.Exit()
+
+    typer.secho("")
+    typer.secho("  ✓  Skills removal finished.", fg="green", bold=True)
+    typer.secho(f"  Canonical removed: {', '.join(result['removed_canonical']) or 'none'}", dim=True)
+    typer.secho(f"  Target entries removed: {len(result['removed_targets'])}", dim=True)
+    typer.secho("")
+
+
+def _run_login_flow(
+    *,
+    poll_seconds: float,
+    timeout_s: float,
+    no_browser: bool,
+    env_file: Optional[str],
+) -> None:
+    load_env_file()
+    try:
+        resolved_api = get_cli_auth_api_base()
+        resolved_page = get_cli_auth_page_url()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    if poll_seconds <= 0:
+        raise typer.BadParameter("--poll-seconds must be > 0", param_hint="--poll-seconds")
+    if timeout_s <= 0:
+        raise typer.BadParameter("--timeout must be > 0", param_hint="--timeout")
+
+    try:
+        api_key = run_browser_login(
+            api_base=resolved_api,
+            page_url=resolved_page,
+            poll_seconds=poll_seconds,
+            timeout_s=timeout_s,
+            no_browser=no_browser,
+        )
+        if env_file:
+            env_path = Path(env_file).expanduser()
+            merge_env_api_key(env_path, api_key)
+            out_desc: Path | str = env_path
+        else:
+            cred_path = get_credentials_path()
+            save_credentials_json(cred_path, api_key)
+            out_desc = cred_path
+    except CliAuthError as exc:
+        typer.secho(f"\n  ✗  {exc}\n", fg="red", err=True)
+        logger.error(str(exc))
+        raise typer.Exit(code=1) from exc
+
+    tail = api_key[-4:] if len(api_key) >= 4 else "****"
+    typer.secho("")
+    typer.secho("  ✓  Signed in successfully.", fg="green", bold=True)
+    typer.secho(f"  Credentials saved to {out_desc}", dim=True)
+    typer.secho(f"  Key ends with …{tail}", dim=True)
+    typer.secho("")
+    logger.debug("Login saved API key to {} (suffix …{})", out_desc, tail)
 
 
 def _parse_json_format(raw: Optional[str]) -> Optional[Any]:
