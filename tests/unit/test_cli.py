@@ -390,6 +390,92 @@ class TestLoginCommand:
             assert data["api_key"] == "k_cred_99"
 
 
+class TestAddSkillsCommand:
+    def test_help(self):
+        result = runner.invoke(app, ["add", "skills", "--help"])
+        assert result.exit_code == 0
+        assert "--login" in result.output
+        assert "--source" in result.output
+        assert "--agent" in result.output
+
+    def test_add_skills_runs_installer(self):
+        fake_result = {
+            "sync": {"plugin_source_dir": "/tmp/plugin", "cli_local_dir": "/tmp/cli-skills"},
+            "canonical_dir": "/tmp/canonical",
+            "selected_skills": ["scrape", "search"],
+            "targets": ["cursor"],
+        }
+        with patch("main.run_skills_install", return_value=fake_result) as mock_install:
+            result = runner.invoke(app, ["add", "skills"])
+        assert result.exit_code == 0
+        mock_install.assert_called_once()
+        assert "Skills installation finished" in result.output
+
+    def test_add_skills_json_mode(self):
+        fake_result = {
+            "sync": {"plugin_source_dir": "/tmp/plugin", "cli_local_dir": "/tmp/cli-skills"},
+            "canonical_dir": "/tmp/canonical",
+            "selected_skills": ["scrape"],
+            "targets": [],
+        }
+        with patch("main.run_skills_install", return_value=fake_result):
+            result = runner.invoke(app, ["add", "skills", "--json"])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["selected_skills"] == ["scrape"]
+
+    def test_add_skills_with_login_runs_login_first(self):
+        fake_result = {
+            "sync": {"plugin_source_dir": "/tmp/plugin", "cli_local_dir": "/tmp/cli-skills"},
+            "canonical_dir": "/tmp/canonical",
+            "selected_skills": ["scrape"],
+            "targets": [],
+        }
+        with patch("main._run_login_flow") as mock_login, patch(
+            "main.run_skills_install", return_value=fake_result
+        ) as mock_install:
+            result = runner.invoke(app, ["add", "skills", "--login"])
+        assert result.exit_code == 0
+        mock_login.assert_called_once()
+        mock_install.assert_called_once()
+
+    def test_add_skills_invalid_link_mode(self):
+        result = runner.invoke(app, ["add", "skills", "--link-mode", "bad"])
+        assert result.exit_code != 0
+
+    def test_add_skills_no_global_requires_agent_skills_dir(self):
+        result = runner.invoke(app, ["add", "skills", "--no-global"])
+        assert result.exit_code != 0
+        assert "--agent-skills-dir" in result.output
+
+
+class TestRemoveSkillsCommand:
+    def test_help(self):
+        result = runner.invoke(app, ["remove", "skills", "--help"])
+        assert result.exit_code == 0
+        assert "--agent" in result.output
+        assert "--skill" in result.output
+
+    def test_remove_skills_runs_remover(self):
+        fake_result = {
+            "removed_canonical": ["scrape"],
+            "removed_targets": [{"agent": "cursor", "path": "/tmp/.cursor/skills/scrape"}],
+        }
+        with patch("main.run_skills_remove", return_value=fake_result) as mock_remove:
+            result = runner.invoke(app, ["remove", "skills", "--skill", "scrape"])
+        assert result.exit_code == 0
+        mock_remove.assert_called_once()
+        assert "Skills removal finished" in result.output
+
+    def test_remove_skills_json(self):
+        fake_result = {"removed_canonical": ["map"], "removed_targets": []}
+        with patch("main.run_skills_remove", return_value=fake_result):
+            result = runner.invoke(app, ["remove", "skills", "--json"])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["removed_canonical"] == ["map"]
+
+
 class TestBatchUpdateCommand:
     def test_help(self):
         result = runner.invoke(app, ["batch-update", "--help"])

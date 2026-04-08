@@ -18,6 +18,7 @@ The same CLI is available as a **standalone binary** (no Python required) via [n
 - [Output, stdout, and agents](#output-stdout-and-agents)
 - [Commands](#commands)
   - [`login`](#login--browser-auth)
+  - [`add skills`](#add-skills--install-local-skills)
   - [`map`](#map--discover-urls)
   - [`answer`](#answer--researched-answers)
   - [`scrape`](#scrape--single-url)
@@ -159,6 +160,39 @@ Set `NO_BROWSER=1` in the environment for the same effect as `--no-browser` (use
 olostep login
 olostep login --no-browser   # copy the printed URL into a local browser
 olostep login --env-file ./.env
+```
+
+---
+
+### `add skills` — install local skills
+
+Installs OloStep skills from the local CLI skills directory (`CLI/skills` by default), then installs into canonical and agent skill directories. Installed folder names are namespaced with an `olostep-` prefix.
+
+Command forms:
+- `olostep add skills`
+- `olostep add skills --login` (runs browser login flow first)
+
+Common install options:
+
+| Option | Description |
+| ------ | ----------- |
+| `--source` | Skills source directory (default: `CLI/skills`) |
+| `--cli-local-dir` | CLI-local copied skills directory (default: `CLI/skills`) |
+| `--agent` | Install for specific agent(s), repeatable |
+| `--all-agents` / `--no-all-agents` | Target all detected agents |
+| `--global` / `--no-global` | Install into global agent skill directories |
+| `--canonical-dir` | Canonical store path (default: `~/.agents/skills`) |
+| `--agent-skills-dir` | Override install destination in non-global mode |
+| `--skill` / `--exclude` | Include/exclude skill names, repeatable |
+| `--overwrite` / `--no-overwrite` | Replace existing installs |
+| `--link-mode` | `auto`, `symlink`, or `copy` |
+| `--json` | Print machine-readable output |
+
+```bash
+olostep add skills
+olostep add skills --login
+olostep add skills --skill scrape --skill map --exclude setup
+olostep add skills --no-global --agent-skills-dir ~/.cursor/skills --link-mode copy
 ```
 
 ---
@@ -351,6 +385,7 @@ If you omit `--out`, JSON is written under `output/`:
 │   ├── map_api.py
 │   ├── answer_api.py
 │   ├── scrape_api.py
+│   ├── skills_install.py
 │   ├── crawl_api.py
 │   ├── batch_api.py
 │   └── batch_scraper.py
