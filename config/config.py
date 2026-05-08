@@ -48,8 +48,16 @@ SCRAPE_FORMATS_ALLOWED: Final = ("html", "markdown", "text", "json", "raw_pdf", 
 BATCH_RETRIEVE_PROGRESS_LOG_EVERY: Final = 50
 
 def _resolve_project_root() -> Path:
-    """Support PyInstaller frozen executables where __file__ is unreliable."""
+    """Resolve runtime root for source and frozen builds.
+
+    In PyInstaller one-file mode, bundled data files are extracted under
+    ``sys._MEIPASS`` at runtime. Prefer that location when present so bundled
+    assets (for example, ``skills/``) are discoverable.
+    """
     if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass).resolve()
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 

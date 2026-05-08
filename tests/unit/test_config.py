@@ -26,6 +26,7 @@ from config.config import (
     resolve_timeout_s,
     BATCH_BASE_URL,
     DEFAULT_HTTP_TIMEOUT_S,
+    _resolve_project_root,
 )
 
 
@@ -240,3 +241,19 @@ class TestSettings:
     def test_from_env_placeholder_url_raises(self):
         with pytest.raises(ValueError, match="placeholder"):
             Settings.from_env(api_key="k", base_url="<YOUR_BASE_URL>")
+
+
+class TestProjectRootResolution:
+    def test_frozen_prefers_meipass(self, monkeypatch):
+        monkeypatch.setattr("sys.frozen", True, raising=False)
+        monkeypatch.setattr("sys._MEIPASS", "/tmp/olostep-meipass", raising=False)
+        monkeypatch.setattr("sys.executable", "/tmp/bin/olostep", raising=False)
+
+        assert _resolve_project_root() == Path("/tmp/olostep-meipass").resolve()
+
+    def test_frozen_without_meipass_uses_executable_parent(self, monkeypatch):
+        monkeypatch.setattr("sys.frozen", True, raising=False)
+        monkeypatch.setattr("sys._MEIPASS", None, raising=False)
+        monkeypatch.setattr("sys.executable", "/tmp/bin/olostep", raising=False)
+
+        assert _resolve_project_root() == Path("/tmp/bin")

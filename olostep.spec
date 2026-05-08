@@ -4,7 +4,9 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ("skills", "skills"),
+    ],
     hiddenimports=[
         "config",
         "config.config",
